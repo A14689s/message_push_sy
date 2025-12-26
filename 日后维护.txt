@@ -1,0 +1,91 @@
+### 1. 常用管理命令
+
+转发助手已作为系统服务运行，你可以通过以下命令控制它：
+
+| 操作 | 命令 |
+| --- | --- |
+| **查看运行状态** | `sudo systemctl status tg-forward` |
+| **启动服务** | `sudo systemctl start tg-forward` |
+| **停止服务** | `sudo systemctl stop tg-forward` |
+| **重启服务** (改完配置必做) | `sudo systemctl restart tg-forward` |
+| **禁止开机自启** | `sudo systemctl disable tg-forward` |
+
+---
+
+### 2. 日志查看 (排查核心)
+
+如果你发现消息没转发，或者想看大V的 ID，使用 `journalctl`：
+
+* **查看实时滚动日志**：
+`journalctl -u tg-forward -f`
+* **查看最近 50 行日志**：
+`journalctl -u tg-forward -n 50`
+* **查看今天的错误日志**：
+`journalctl -u tg-forward --since today | grep Error`
+
+---
+
+### 3. 修改配置流程
+
+如果你需要增加新的 **#标签**、新的 **大V ID** 或更改 **监控群组**：
+
+1. **进入目录**：`cd ~/tg-forwarder`
+2. **编辑配置**：`nano .env`
+3. **修改内容**：
+* 确保标签带双引号：`WATCH_TAGS="#总结,#策略,#BTC"`
+* 确保 ID 用逗号隔开：`TARGET_USER_IDS="12345678,98765432"`
+
+
+4. **保存并退出**：按 `Ctrl + O` 然后 `Enter` 保存，按 `Ctrl + X` 退出。
+5. **重启服务生效**：`sudo systemctl restart tg-forward`
+
+---
+
+### 4. 获取大V或群组的“数字 ID”
+
+由于用户名（@xxx）可能会变，使用数字 ID 最稳。你可以通过以下方式获取：
+
+1. **开启调试输出**：在 `messagepush.py` 的 `handler` 里临时加上 `print(f"ID: {sender_id} Content: {text}")`。
+2. **查看实时日志**：运行 `journalctl -u tg-forward -f`。
+3. **观察输出**：当目标人物在群里说话时，日志会跳出他的真实 `sender_id`。
+4. **填回配置**：将这个 ID 填入 `.env`。
+
+---
+
+### 5. 文件结构说明
+
+```text
+~/tg-forwarder/
+├── venv/                 # 虚拟环境 (不要手动修改里面内容)
+├── messagepush.py        # 程序逻辑代码
+├── .env                  # 你的所有配置 (API_ID, Webhook, 标签等)
+└── forwarder_session.session  # 登录凭证 (切勿删除，否则需重新登录)
+
+```
+
+---
+
+### 6. 异常处理 Checklist
+
+* **状态显示 `active (running)` 但没收到消息**：
+* 检查 `.env` 里的 `WATCH_CHATS` 是否包含 `-100` 前缀。
+* 手动向 Webhook 发一条 `curl` 测试，确认企业微信机器人没失效。
+
+
+* **状态显示 `failed` 或不断重启**：
+* 检查 `journalctl` 日志。
+* 最常见原因是代码报错（如之前遇到的 `NoneType` 拼接错误）。
+
+
+* **服务器重启后助手没跑起来**：
+* 检查是否执行过 `sudo systemctl enable tg-forward`。
+
+
+
+---
+
+### 7. 资源占用警戒线
+
+* **内存**：如果 `status` 显示内存超过 **200MB**，说明可能存在消息积压或内存泄露（目前看只有 40MB，非常安全）。
+* **磁盘**：如果日志文件过大（通常 systemd 会自动滚动，不用担心），可以运行 `sudo journalctl --vacuum-time=7d` 清理一周前的日志。
+
