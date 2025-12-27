@@ -6,162 +6,102 @@ import python_socks
 from telethon import TelegramClient, events
 from dotenv import load_dotenv
 
-# ==========================================
-# 1. 基础配置与日志
-# ==========================================
-logging.basicConfig(
-    level=logging.INFO, 
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+# 初始化日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# 加载 .env 配置文件
+# 加载配置
 load_dotenv()
 
-# ==========================================
-# 2. 逻辑工具函数 (必须放在主逻辑之前)
-# ==========================================
+API_ID = int(os.getenv('TG_API_ID'))
+API_HASH = os.getenv('TG_API_HASH')
+# 解析监控列表
+WATCH_CHATS = [int(i.strip()) if i.strip().replace('-', '').isdigit() else i.strip() for i in os.getenv('WATCH_CHATS', '').split(',')]
+WATCH_TAGS = [i.strip() for i in os.getenv('WATCH_TAGS', '').split(',')]
+TARGET_USER_IDS = [i.strip() for i in os.getenv('TARGET_USER_IDS', '').split(',')]
 
-def parse_env_list(key):
-    """解析环境变量中的逗号分隔列表"""
-    val = os.getenv(key, '')
-    if not val:
-        return []
-    return [i.strip() for i in val.split(',') if i.strip()]
+# Webhooks
+WEBHOOK_TAG = os.getenv('WEBHOOK_TAG')
+WEBHOOK_VIP = os.getenv('WEBHOOK_VIP')
+WEBHOOK_BOT = os.getenv('WEBHOOK_BOT')
+print(f"--- 调试信息：WEBHOOK_BOT 的值是: {WEBHOOK_BOT} ---")
 
-def prepare_chats(raw_list):
-    """解析监听范围：将链接、@账号 转为 Telethon 可识别格式"""
-    processed = []
-    for item in raw_list:
-        if 't.me/' in item:
-            processed.append(f"@{item.split('/')[-1]}")
-        elif item.lstrip('-').isdigit():
-            processed.append(int(item))
-        else:
-            processed.append(item)
-    return processed
-
-def prepare_target_users(raw_list):
-    """解析大V列表：支持数字ID和@用户名"""
-    processed = []
-    for item in raw_list:
-        if item.lstrip('-').isdigit():
-            processed.append(int(item))
-        else:
-            # 确保用户名带有 @ 前缀
-            processed.append(item if item.startswith('@') else f"@{item}")
-    return processed
-
-# ==========================================
-# 3. 配置初始化 (调用上述函数)
-# ==========================================
-
-API_ID = int(os.getenv('TG_API_ID', '0'))
-API_HASH = os.getenv('TG_API_HASH', '')
-WEBHOOK_URL = os.getenv('WECOM_WEBHOOK', '')
-
-# 核心过滤规则解析
-WATCH_CHATS = prepare_chats(parse_env_list('WATCH_CHATS'))
-TARGET_USER_IDS = prepare_target_users(parse_env_list('TARGET_USER_IDS'))
-WATCH_TAGS = parse_env_list('WATCH_TAGS')
-
-# 代理配置 (SOCKS5 10808)
-proxy = (python_socks.ProxyType.SOCKS5, '127.0.0.1', 10808)
-
-# 初始化客户端
-client = TelegramClient(
-    'forwarder_session', 
-    API_ID, 
-    API_HASH, 
-    proxy=None,
-    connection_retries=None,
-    auto_reconnect=True
-)
-
-# ==========================================
-# 4. 核心功能函数
-# ==========================================
-
-def send_to_wecom(text):
-    """推送消息到企业微信 Webhook"""
-    if len(text.encode('utf-8')) > 4000:
-        text = text[:1000] + "\n...(消息过长已截断)"
-    
-    payload = {
-        "msgtype": "markdown",
-        "markdown": {"content": text}
-    }
-    try:
-        r = requests.post(WEBHOOK_URL, json=payload, timeout=15)
-        r.raise_for_status()
-    except Exception as e:
-        logger.error(f"Webhook 发送失败: {e}")
-
-@client.on(events.NewMessage(chats=WATCH_CHATS))
-async def handler(event):
-    msg = event.message
-    text = msg.message
-    if not text:
+def push_to_wecom(url, text):
+    """通用推送函数"""
+    print(f"DEBUG: 准备推送到 URL: {url}") 
+    if not url:
+        print("DEBUG: URL 为空，取消推送")
         return
+    try:
+        payload = {"msgtype": "markdown", "markdown": {"content": text}}
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        logger.error(f"推送出错: {e}")
 
-    # 获取发送者信息
-    sender = await event.get_sender()
-    sender_id = msg.from_id.user_id if hasattr(msg.from_id, 'user_id') else None
-    username = getattr(sender, 'username', None)
-    if username:
-        username = f"@{username}"
+def get_sender_name(sender):
+    """获取发送者昵称的健壮函数"""
+    if not sender: return "未知用户"
+    first = getattr(sender, 'first_name', '') or ''
+    last = getattr(sender, 'last_name', '') or ''
+    name = f"{first} {last}".strip()
+    if not name:
+        name = getattr(sender, 'username', '') or str(sender.id)
+    return name
 
-    # --- 判定逻辑：大V(is_vip) OR 有标签(has_tag) ---
-    is_vip = False
-    if TARGET_USER_IDS:
-        if (sender_id in TARGET_USER_IDS) or (username and username in TARGET_USER_IDS):
-            is_vip = True
+# 初始化 Telegram 客户端 (AWS 环境，proxy 设为 None)
+proxy = (python_socks.ProxyType.SOCKS5, '127.0.0.1', 10808)
+client = TelegramClient('forwarder_session', API_ID, API_HASH, proxy=proxy,connection_retries=None,auto_reconnect=True)
 
-    has_tag = False
-    if WATCH_TAGS:
-        has_tag = any(tag.lower() in text.lower() for tag in WATCH_TAGS)
-
-    # 满足任一条件即转发
-    if is_vip or has_tag:
-        reason = "🌟 大V发言" if is_vip else "🏷️ 标签命中"
-        if is_vip and has_tag: reason = "🔥 关键预警(大V+标签)"
-        
+@client.on(events.NewMessage)
+async def handler(event):
+    try:
+        sender = await event.get_sender()
+        text = event.text or ''
         chat = await event.get_chat()
-        chat_title = getattr(chat, 'title', '群组/频道')
-        # 获取发送者昵称，增加空值保护
-        first_name = getattr(sender, 'first_name', '') or ''
-        last_name = getattr(sender, 'last_name', '') or ''
-        sender_name = f"{first_name} {last_name}".strip()
-        
-        # 如果名字还是空的，就用用户名或 ID 顶替
-        if not sender_name: sender_name = username if username else f"ID:{sender_id}"
+        chat_title = getattr(chat, 'title', '私信')
+        sender_id = str(event.sender_id)
+        username = f"@{sender.username}" if getattr(sender, 'username', None) else ""
 
-        formatted_msg = (
-            f"### {reason}\n"
-            f">**来源群组**: `{chat_title}`\n"
-            f">**发布人员**: `{sender_name}`\n"
-            f">**消息内容**:\n{text}"
-        )
-        
-        logger.info(f"命中规则: {reason} | 发送者: {sender_name}")
-        send_to_wecom(formatted_msg)
+        # --- 逻辑 A: 机器人私信 (直接分流到 WEBHOOK_BOT) ---
+        if event.is_private and getattr(sender, 'bot', False):
+            logger.info(f"🤖 捕获机器人私信: {get_sender_name(sender)}")
+            msg = f"### 🤖 机器人私信\n**来源**: {get_sender_name(sender)}\n**内容**:\n{text}"
+            push_to_wecom(WEBHOOK_BOT, msg)
+            return
 
-# ==========================================
-# 5. 启动入口
-# ==========================================
+        # --- 逻辑 B: 指定群组监控 ---
+        # 匹配数字ID或用户名
+        is_in_watch_chats = False
+        if event.chat_id in WATCH_CHATS or str(event.chat_id) in WATCH_CHATS:
+            is_in_watch_chats = True
+        
+        if is_in_watch_chats:
+            # 1. 检查大V (VIP)
+            is_vip = sender_id in TARGET_USER_IDS or (username and username in TARGET_USER_IDS)
+            if is_vip:
+                logger.info(f"🌟 命中大V: {get_sender_name(sender)}")
+                msg = f"### 🌟 大V发言\n**来源**: {get_sender_name(sender)}\n**群组**: {chat_title}\n**内容**:\n{text}"
+                push_to_wecom(WEBHOOK_VIP, msg)
+
+            # 2. 检查标签 (TAG)
+            has_tag = any(tag in text for tag in WATCH_TAGS)
+            if has_tag:
+                logger.info(f"🏷️ 命中标签")
+                msg = f"### 🏷️ 标签命中\n**来源**: {get_sender_name(sender)}\n**群组**: {chat_title}\n**内容**:\n{text}"
+                push_to_wecom(WEBHOOK_TAG, msg)
+
+    except Exception as e:
+        logger.error(f"处理消息异常: {e}")
 
 async def main():
-    await client.start()
-    logger.info("=" * 30)
-    logger.info("TG 实时转发服务启动成功")
-    logger.info(f"监控范围: {WATCH_CHATS}")
+    logger.info("==============================")
+    logger.info("三路分流转发服务启动成功")
+    logger.info(f"监控群组: {WATCH_CHATS}")
     logger.info(f"监控大V: {TARGET_USER_IDS}")
     logger.info(f"监控标签: {WATCH_TAGS}")
-    logger.info("=" * 30)
+    logger.info("==============================")
+    await client.start()
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("程序已手动停止")
+    asyncio.run(main())
