@@ -49,7 +49,13 @@ def get_sender_name(sender):
         name = getattr(sender, 'username', '') or str(sender.id)
     return name
 
-proxy = (python_socks.ProxyType.HTTP, '127.0.0.1', 10809)
+if sys.platform == 'win32':
+    import python_socks
+    proxy = (python_socks.ProxyType.HTTP, '127.0.0.1', 10809)
+    logger.info("检测到 Windows 环境，已开启本地代理")
+else:
+    proxy = None
+    logger.info("检测到 Linux 环境，禁用代理直连")
 
 client = TelegramClient('forwarder_session', API_ID, API_HASH, proxy=proxy, connection_retries=None, auto_reconnect=True)
 
