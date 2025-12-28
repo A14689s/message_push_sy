@@ -5,7 +5,8 @@ import requests
 import python_socks
 from telethon import TelegramClient, events
 from dotenv import load_dotenv
-
+# 自动判断：如果是在服务器(Linux)运行则不使用代理，本地(Windows)则使用代理
+import sys
 # 初始化日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -48,9 +49,9 @@ def get_sender_name(sender):
         name = getattr(sender, 'username', '') or str(sender.id)
     return name
 
-# 初始化 Telegram 客户端 (AWS 环境，proxy 设为 None)
-proxy = (python_socks.ProxyType.SOCKS5, '127.0.0.1', 10808)
-client = TelegramClient('forwarder_session', API_ID, API_HASH, proxy=None,connection_retries=None,auto_reconnect=True)
+proxy = (python_socks.ProxyType.HTTP, '127.0.0.1', 10809)
+
+client = TelegramClient('forwarder_session', API_ID, API_HASH, proxy=proxy, connection_retries=None, auto_reconnect=True)
 
 @client.on(events.NewMessage)
 async def handler(event):
