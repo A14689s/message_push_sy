@@ -19,12 +19,12 @@ API_HASH = os.getenv('TG_API_HASH')
 WATCH_CHATS = [int(i.strip()) if i.strip().replace('-', '').isdigit() else i.strip() for i in os.getenv('WATCH_CHATS', '').split(',')]
 WATCH_TAGS = [i.strip() for i in os.getenv('WATCH_TAGS', '').split(',')]
 TARGET_USER_IDS = [i.strip() for i in os.getenv('TARGET_USER_IDS', '').split(',')]
-
+ALLOWED_BOT_ID = os.getenv('ALLOWED_BOT_ID')
 # Webhooks
 WEBHOOK_TAG = os.getenv('WEBHOOK_TAG')
 WEBHOOK_VIP = os.getenv('WEBHOOK_VIP')
 WEBHOOK_BOT = os.getenv('WEBHOOK_BOT')
-print(f"--- 调试信息：WEBHOOK_BOT 的值是: {WEBHOOK_BOT} ---")
+
 
 def push_to_wecom(url, text):
     """通用推送函数"""
@@ -61,12 +61,18 @@ async def handler(event):
         chat_title = getattr(chat, 'title', '私信')
         sender_id = str(event.sender_id)
         username = f"@{sender.username}" if getattr(sender, 'username', None) else ""
-
-        # --- 逻辑 A: 机器人私信 (直接分流到 WEBHOOK_BOT) ---
+       
+        
+        # --- 修改后的逻辑 A: 仅允许特定机器人 X 的私信 ---
         if event.is_private and getattr(sender, 'bot', False):
-            logger.info(f"🤖 捕获机器人私信: {get_sender_name(sender)}")
-            msg = f"### 🤖 机器人私信\n**来源**: {get_sender_name(sender)}\n**内容**:\n{text}"
-            push_to_wecom(WEBHOOK_BOT, msg)
+            # 只有当发送者 ID 匹配我们允许的 ID 时才转发
+            if sender_id == ALLOWED_BOT_ID:
+                logger.info(f"✅ 捕获目标机器人 X 的消息")
+                msg = f"### 🤖 目标机器人私信\n**内容**:\n{event.text}"
+                push_to_wecom(WEBHOOK_BOT, msg)
+            else:
+                # 如果是其他机器人，记录日志但跳过推送
+                logger.info(f"⏭️ 跳过非目标机器人消息 (ID: {sender_id})")
             return
 
         # --- 逻辑 B: 指定群组监控 ---
