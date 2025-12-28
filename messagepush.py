@@ -50,7 +50,7 @@ def get_sender_name(sender):
 
 # 初始化 Telegram 客户端 (AWS 环境，proxy 设为 None)
 proxy = (python_socks.ProxyType.SOCKS5, '127.0.0.1', 10808)
-client = TelegramClient('forwarder_session', API_ID, API_HASH, proxy=proxy,connection_retries=None,auto_reconnect=True)
+client = TelegramClient('forwarder_session', API_ID, API_HASH, proxy=None,connection_retries=None,auto_reconnect=True)
 
 @client.on(events.NewMessage)
 async def handler(event):
