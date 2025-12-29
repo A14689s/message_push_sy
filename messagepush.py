@@ -20,7 +20,8 @@ API_HASH = os.getenv('TG_API_HASH')
 WATCH_CHATS = [int(i.strip()) if i.strip().replace('-', '').isdigit() else i.strip() for i in os.getenv('WATCH_CHATS', '').split(',')]
 WATCH_TAGS = [i.strip() for i in os.getenv('WATCH_TAGS', '').split(',')]
 TARGET_USER_IDS = [i.strip() for i in os.getenv('TARGET_USER_IDS', '').split(',')]
-ALLOWED_BOT_ID = os.getenv('ALLOWED_BOT_ID')
+raw_allowed_ids = os.getenv('ALLOWED_BOT_ID', '')
+ALLOWED_BOT_IDS = [i.strip() for i in raw_allowed_ids.split(',') if i.strip()]
 # Webhooks
 WEBHOOK_TAG = os.getenv('WEBHOOK_TAG')
 WEBHOOK_VIP = os.getenv('WEBHOOK_VIP')
@@ -70,16 +71,19 @@ async def handler(event):
         username = f"@{sender.username}" if getattr(sender, 'username', None) else ""
        
         
-        # --- 修改后的逻辑 A: 仅允许特定机器人 X 的私信 ---
+        # --- 逻辑 A: 仅允许特定机器人私信 ---
         if event.is_private and getattr(sender, 'bot', False):
-            # 只有当发送者 ID 匹配我们允许的 ID 时才转发
-            if sender_id == ALLOWED_BOT_ID:
-                logger.info(f"✅ 捕获目标机器人 X 的消息")
+            # 获取当前发送者的 ID 字符串
+            current_sender_id = str(event.sender_id)
+            
+            # 使用 in 来判断是否在允许列表中
+            if current_sender_id in ALLOWED_BOT_IDS:
+                logger.info(f"✅ 捕获目标机器人私信 (ID: {current_sender_id})")
                 msg = f"### 🤖 目标机器人私信\n**内容**:\n{event.text}"
                 push_to_wecom(WEBHOOK_BOT, msg)
             else:
-                # 如果是其他机器人，记录日志但跳过推送
-                logger.info(f"⏭️ 跳过非目标机器人消息 (ID: {sender_id})")
+                # 这一行就是你现在日志里看到的跳过逻辑
+                logger.info(f"⏭️ 跳过非目标机器人消息 (ID: {current_sender_id})")
             return
 
         # --- 逻辑 B: 指定群组监控 ---
